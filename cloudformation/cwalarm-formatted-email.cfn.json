@@ -136,6 +136,19 @@
                         }
                     },
                     {
+                        "PolicyName": "Lambda_Permissions_SendTemplatedEmail",
+                        "PolicyDocument": {
+                            "Version": "2012-10-17",
+                            "Statement": [
+                                {
+                                    "Effect": "Allow",
+                                    "Action": "ses:SendTemplatedEmail",
+                                    "Resource": "arn:aws:ses:us-east-1:160071257600:template/TemplateCritical"
+                                }
+                            ]
+                        }                        
+                    },
+                    {
                         "PolicyName": "Lambda_Permissions_CWLogs",
                         "PolicyDocument": {
                             "Version": "2012-10-17",
