@@ -1,0 +1,163 @@
+#from https://github.com/lroguet/amzn-cloudformation/blob/master/lambda/scheduled-lambda.yml
+AWSTemplateFormatVersion: 2010-09-09
+Description: >
+  Resources needed to deploy a scheduled lambda function.
+
+####################################################################################
+Parameters:
+####################################################################################
+
+  LambdaRate:
+    Description: >
+      The rate (frequency) that determines when CloudWatch Events runs the rule that
+      triggers the Lambda function.
+    Default: rate(1 minute)
+    AllowedValues:
+      - rate(1 minute)
+      - rate(10 minutes)
+      - rate(60 minutes)
+    Type: String
+
+####################################################################################
+Resources:
+####################################################################################
+
+  LambdaExecutionRole:
+      Type: "AWS::IAM::Role"
+      Properties:
+        AssumeRolePolicyDocument:
+          Version: 2012-10-17
+          Statement:
+            - Effect: Allow
+              Principal:
+                Service:
+                  - lambda.amazonaws.com
+              Action:
+                - sts:AssumeRole
+        ManagedPolicyArns:
+          - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        Policies:
+          - PolicyName: Lambda_Permissions_CWLogs
+            PolicyDocument:
+              Version: 2012-10-17
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - 'logs:CreateLogGroup'
+                    - 'logs:CreateLogStream'
+                    - 'logs:PutLogEvents'
+                    - 'logs:DescribeLogGroups'
+                  Resource: "arn:aws:logs:*:*:*"
+          - PolicyName: Lambda_Permissions_PutMetrics
+            PolicyDocument:
+              Version: 2012-10-17
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - 'cloudwatch:PutMetricData'
+                  Resource: "*"
+  LambdaSchedule:
+    Type: "AWS::Events::Rule"
+    Properties:
+      Description: >
+        A schedule for the Lambda function..
+      ScheduleExpression: !Ref LambdaRate
+      State: ENABLED
+      Targets:
+        - Arn: !Sub ${LambdaFunction.Arn}
+          Id: LambdaSchedule
+
+  LambdaSchedulePermission:
+    Type: "AWS::Lambda::Permission"
+    Properties:
+      Action: 'lambda:InvokeFunction'
+      FunctionName: !Sub ${LambdaFunction.Arn}
+      Principal: 'events.amazonaws.com'
+      SourceArn: !Sub ${LambdaSchedule.Arn}
+
+  LambdaFunction:
+    Type: "AWS::Lambda::Function"
+    Properties:
+      Description: >
+        Lambda function that returns 'Hello World!'
+      Code:
+        ZipFile: |
+          import boto3
+          import random
+          cloudwatch = boto3.client('cloudwatch')
+          def publishing_metrics(event, context):
+              num=random.randint(0, 100)
+              total=random.randint(0, 100)
+              alarm=random.randint(0, 100)
+              response = cloudwatch.put_metric_data(
+                  MetricData = [
+                      {
+                          'MetricName': 'OnlineDevices',
+                          'Dimensions': [
+                              {
+                                  'Name': 'LastMessages',
+                                  'Value': 'With-in-one-hour'
+                              },
+                              {
+                                  'Name': 'APP_VERSION',
+                                  'Value': '1.0'
+                              },
+                              ],
+                              'Unit': 'Count',
+                              'Value': num
+                      },
+                      {
+                          'MetricName': 'TotalDevices',
+                          'Dimensions': [
+                              {
+                                  'Name': 'LastMessages',
+                                  'Value': 'With-in-one-year'
+                              },
+                              {
+                                  'Name': 'APP_VERSION',
+                                  'Value': '1.0'
+                              },
+                              ],
+                              'Unit': 'Count',
+                              'Value': total
+                      },
+                      ],
+                      Namespace = 'JasonCustomeMetrics')
+      Handler: index.publishing_metrics
+      MemorySize: 128
+      Role: !Sub ${LambdaExecutionRole.Arn}
+      Runtime: python3.9
+  # 创建 CloudWatch Alarm
+  MyCloudWatchAlarm:
+    Type: "AWS::CloudWatch::Alarm"
+    Properties:
+      AlarmName: "MyCloudWatchAlarm"
+      AlarmDescription: "My CloudWatch Alarm"
+      MetricName: "TotalDevices"
+      Namespace: "JasonCustomeMetrics"
+      Dimensions:
+        - Name: LastMessages
+          Value: With-in-one-year
+        - Name: APP_VERSION
+          Value: 1.0
+      ComparisonOperator: "GreaterThanThreshold"
+      EvaluationPeriods: 1
+      Period: 60
+      Statistic: "Sum"
+      Threshold: 0
+      ActionsEnabled: true
+      AlarmActions:
+        - !Ref MySnsTopic
+  # 创建 SNS Topic
+  MySnsTopic:
+    Type: "AWS::SNS::Topic"
+    Properties:
+      DisplayName: "My SNS Topic"
+      TopicName: "MySnsTopic"
+  # 创建 SNS Subscription
+  MySnsSubscription:
+    Type: "AWS::SNS::Subscription"
+    Properties:
+      Protocol: "email"
+      TopicArn: !Ref MySnsTopic
+      Endpoint: "764093375@qq.com"
