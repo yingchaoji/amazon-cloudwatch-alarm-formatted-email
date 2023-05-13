@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: 2010-09-09
-Description: "SNS -> SQS -> Lambda ->cloudwatch"
+Description: "SNS -> SQS -> Lambda w/ optional aws-sdk layer"
 Transform:
   - AWS::Serverless-2016-10-31
 
@@ -26,12 +26,8 @@ Resources:
                   - sqs:DeleteMessage
                   - sqs:GetQueueAttributes
                   - sqs:ReceiveMessage
-                Resource: !GetAtt queue.Arn
-      Policies:
-        - PolicyName: CloudWatchLogsPolicy
-          PolicyDocument:
-            Version: "2012-10-17"
-            Statement:
+                  - sqs:SendMessage
+                Resource:  !GetAtt Queue.Arn
               - Effect: Allow
                 Action:
                   - logs:CreateLogGroup
