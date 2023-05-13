@@ -62,6 +62,7 @@ resources:
         MessageRetentionPeriod: 60
         QueueName: my-first-queue-${opt:stage}
         VisibilityTimeout: 180
+        KmsMasterKeyId: AQICAHjjXSrJ+6BdIq2iizFHM3iA6neQyKPzY2LMrZvM5TPZ+wF5i5Gd22I4FM7ACFesiBdCAAAAbzBtBgkqhkiG9w0BBwagYDBeAgEAMFkGCSqGSIb3DQEHATAeBglghkgBZQMEAS4wEQQMvwpzi3PPhtkH4x/AAgEQgCzgqgfrdn7sjmGJhA9fQVjFpQuKf2HmpTnD0HjHt807SZth5JmY0kpR4P51Xg==
     
     SNSTopicQueuePolicy:
       Type: AWS::SQS::QueuePolicy
