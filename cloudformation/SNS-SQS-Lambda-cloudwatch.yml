@@ -1,0 +1,131 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: "SNS -> SQS -> Lambda ->cloudwatch"
+Transform:
+  - AWS::Serverless-2016-10-31
+
+Resources:
+  LambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "LambdaRole"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Policies:
+        - PolicyName: !Sub "LambdaPolicy-sqs"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sqs:DeleteMessage
+                  - sqs:GetQueueAttributes
+                  - sqs:ReceiveMessage
+                Resource: "*"
+      Policies:
+        - PolicyName: CloudWatchLogsPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/*"
+
+  Queue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub "queue"
+      VisibilityTimeout: 30
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt QueueDLQ.Arn
+        maxReceiveCount: 3
+
+  QueueDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub "dlq"
+                
+  SNSTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub "topic"
+
+  SNSToQueuePolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: "allow-sns-messages"
+            Effect: Allow
+            Principal: "*"
+            Resource: !GetAtt Queue.Arn
+            Action: "SQS:SendMessage"
+            Condition:
+              ArnEquals:
+                "aws:SourceArn": !Ref SNSTopic
+      Queues:
+        - Ref: Queue
+
+  QueueSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      TopicArn: !Ref SNSTopic
+      Endpoint: !GetAtt Queue.Arn
+      Protocol: sqs
+      RawMessageDelivery: "true"
+
+  Lambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "lambda-function"
+      Handler: index.handler
+      MemorySize: 128
+      Role: !Sub ${LambdaRole.Arn}
+      Runtime: nodejs12.x
+      Code:
+        ZipFile: |
+          exports.handler = async function(event, context) {
+          event.Records.forEach(record => {
+            const { body } = record;
+            console.log(body);
+          });
+          return {};
+          }
+
+  LambdaFunctionEventSourceMapping:
+    Type: AWS::Lambda::EventSourceMapping
+    Properties:
+      BatchSize: 10
+      Enabled: true
+      EventSourceArn: !GetAtt Queue.Arn
+      FunctionName: !GetAtt Lambda.Arn
+
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${Lambda}"
+      RetentionInDays: 3
+
+
+Outputs:
+  SourceQueueURL:
+    Description: "URL of source queue"
+    Value: !Ref Queue
+  SourceQueueARN:
+    Description: "ARN of source queue"
+    Value: !GetAtt Queue.Arn
+  DeadLetterQueueURL:
+    Description: "URL of dead-letter queue"
+    Value: !Ref QueueDLQ
+  DeadLetterQueueARN:
+    Description: "ARN of dead-letter queue"
+    Value: !GetAtt QueueDLQ.Arn
