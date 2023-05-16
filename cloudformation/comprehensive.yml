@@ -1,5 +1,3 @@
-Metadata: 
-  License: Apache-2.0
 AWSTemplateFormatVersion: '2010-09-09'
 Description: 'Comprehensive experiences'
 Parameters:
@@ -47,6 +45,49 @@ Parameters:
   LatestAmiId:
     Type:  'AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>'
     Default: '/aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2'
+  
+  #############
+  pS3DeploymentBucket:
+    Type: String
+    Description: S3 bucket that contains Lambda zip package
+    Default: jason-wang-test-bucket
+  pS3DeploymentKey:
+    Type: String
+    Description: S3 key of the Lambda zip package
+    Default: amazon-cloudwatch-alarm-formatted-email-sqs.zip
+  pEmailToAddress:
+    Type: String
+    Description: 'Receiver (To:) email address'
+    Default: '764093375@qq.com'
+  pEmailSource:
+    Type: String
+    Description: Sender email address. Should be a verified identity in SES
+    Default: '764093375@qq.com'
+  pEmailCcAddress:
+    Type: String
+    Description: 'Receiver (Cc:) email address'
+    Default: '764093375@qq.com'
+  pEmailReplyToAddress:
+    Type: String
+    Description: Reply To email address
+    Default: '764093375@qq.com'
+
+Metadata:
+  'AWS::CloudFormation::Interface':
+    ParameterGroups:
+      - Label:
+          default: AWS Lambda Configuration
+        Parameters:
+          - pS3DeploymentBucket
+          - pS3DeploymentKey
+      - Label:
+          default: Amazon SES Configuration
+        Parameters:
+          - pEmailSource
+          - pEmailToAddress
+          - pEmailCcAddress
+          - pEmailReplyToAddress
+    ParameterLabels: {}
 Resources:
   EC2Instance:
     Type: AWS::EC2::Instance
@@ -101,6 +142,202 @@ Resources:
     Properties:
       InstanceId: !Ref 'EC2Instance'
       EIP: !Ref 'IPAddress'
+  ### 添加一个alarm对生成的instance进行监控
+  MyCloudWatchAlarm:
+    Type: "AWS::CloudWatch::Alarm"
+    Properties:
+      AlarmName: "MyCloudWatchAlarm"
+      AlarmDescription: "CPUUtilization"
+      MetricName: "CPUUtilization"
+      Namespace: "AWS/EC2"
+      Dimensions:
+        - Name: InstanceId
+          Value: !Ref 'EC2Instance'
+      ComparisonOperator: "GreaterThanThreshold"
+      EvaluationPeriods: 1
+      Period: 60
+      Statistic: "Average"
+      Threshold: 10
+      ActionsEnabled: true
+      AlarmActions:
+        - !Ref rCwAlarmSns
+
+  rFunctionRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      Path: /
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Policies:
+        - PolicyName: Lambda_Permissions_SES
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'ses:SendEmail'
+                  - 'ses:SendTemplatedEmail'
+                  - 'ses:SendRawEmail'
+                Resource: !Sub >-
+                  arn:${AWS::Partition}:ses:${AWS::Region}:${AWS::AccountId}:identity/*
+              - Effect: Allow
+                Action: 'ses:SendTemplatedEmail'
+                Resource: 'arn:aws:ses:us-east-1:160071257600:template/TemplateCritical'
+              - Effect: Allow
+                Action:
+                  - 'logs:CreateLogGroup'
+                  - 'logs:CreateLogStream'
+                  - 'logs:PutLogEvents'
+                  - 'logs:DescribeLogGroups'
+                Resource: !Sub >-
+                  arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:*
+              - Effect: Allow
+                Action:
+                  - 'sqs:DeleteMessage'
+                  - 'sqs:GetQueueAttributes'
+                  - 'sqs:ReceiveMessage'
+                  - 'sqs:SendMessage'
+                Resource:  !GetAtt Queue.Arn
+  rLambdaFunctionPermission:
+    Type: 'AWS::Lambda::Permission'
+    Properties:
+      FunctionName: !GetAtt 
+        - rFormattedEmailLambdaFunction
+        - Arn
+      Action: 'lambda:InvokeFunction'
+      Principal: sns.amazonaws.com
+      SourceArn: !Ref rCwAlarmSns
+  rCwAlarmSns:
+    Type: 'AWS::SNS::Topic'
+    Properties:
+      Subscription:
+        - Protocol: sqs
+          Endpoint: !GetAtt 
+            - Queue
+            - Arn
+  rCwAlarmSnsPolicy:
+    Type: 'AWS::SNS::TopicPolicy'
+    Properties:
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - cloudwatch.amazonaws.com
+            Action: 'SNS:Publish'
+            Resource:
+              - !Ref rCwAlarmSns
+      Topics:
+        - !Ref rCwAlarmSns
+  rTemplateCritical:
+    Type: 'AWS::SES::Template'
+    Properties:
+      Template:
+        TemplateName: TemplateCritical
+        SubjectPart: 'CRITICAL Alarm on {{alarm}}'
+        HtmlPart: >-
+          <h2><span style="color: #d13212;">&#9888</span>Your Amazon CloudWatch
+          alarm was triggered</h2><table style="height: 245px; width: 70%;
+          border-collapse: collapse;" border="1" cellspacing="70"
+          cellpadding="5"><tbody><tr style="height: 45px;"><td style="width:
+          22.6262%; background-color: #f2f3f3; height: 45px;"><span
+          style="color: #16191f;"><strong>Impact</strong></span></td><td
+          style="width: 60.5228%; background-color: #ffffff; height:
+          45px;"><strong><span style="color:
+          #d13212;">Critical</span></strong></td></tr><tr style="height:
+          45px;"><td style="width: 22.6262%; height: 45px; background-color:
+          #f2f3f3;"><span style="color: #16191f;"><strong>Alarm
+          Name</strong></span></td><td style="width: 60.5228%; height:
+          45px;">{{alarm}}</td></tr><tr style="height: 45px;"><td style="width:
+          22.6262%; height: 45px; background-color: #f2f3f3;"><span
+          style="color: #16191f;"><strong>Account</strong></span></td><td
+          style="width: 60.5228%; height: 45px;"><p>{{account}}
+          {{region}})</p></td></tr><tr style="height: 45px;"><td style="width:
+          22.6262%; height: 45px; background-color: #f2f3f3;"><span
+          style="color: #16191f;"><strong>Instance-id</strong></span></td><td
+          style="width: 60.5228%; height: 45px;">{{instanceId}}</td></tr><tr
+          style="height: 45px;"><td style="width: 22.6262%; background-color:
+          #f2f3f3; height: 45px;"><span style="color:
+          #16191f;"><strong>Date-Time</strong></span></td><td style="width:
+          60.5228%; height: 45px;">{{datetime}}</td></tr><tr style="height:
+          45px;"><td style="width: 22.6262%; height: 45px; background-color:
+          #f2f3f3;"><span style="color:
+          #16191f;"><strong>Reason</strong></span></td><td style="width:
+          60.5228%; height: 45px;">Current value <strong> {{value}} </strong> is
+          {{comparisonoperator}} <strong> {{threshold}} </strong>
+          </td></tr></tbody></table>
+  rFormattedEmailLambdaFunction:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Code:
+        S3Bucket: !Ref pS3DeploymentBucket
+        S3Key: !Ref pS3DeploymentKey
+      Description: CloudWatch alarms email formatter
+      Handler: cwalarm-formatted-email-lambda-sqs.lambda_handler
+      Role: !GetAtt 
+        - rFunctionRole
+        - Arn
+      Runtime: python3.8
+      Timeout: 60
+      Environment:
+        Variables:
+          EMAIL_SOURCE: !Ref pEmailSource
+          EMAIL_TO_ADDRESSES: !Ref pEmailToAddress
+          EMAIL_CC_ADDRESSES: !Ref pEmailCcAddress
+          EMAIL_REPLY_TO_ADRESSES: !Ref pEmailReplyToAddress
+          SES_TEMPLATE_CRITICAL: TemplateCritical
+      Tags:
+        - Key: 'lambda:createdBy'
+          Value: SAM
+##添加sqs
+  Queue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub "queue"
+      VisibilityTimeout: 60
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt QueueDLQ.Arn
+        maxReceiveCount: 3
+
+  QueueDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub "dlq"
+      
+  ## SNS to queue policy
+  SNSToQueuePolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: "allow-sns-messages"
+            Effect: Allow
+            Principal: "*"
+            Resource: !GetAtt Queue.Arn
+            Action: "SQS:SendMessage"
+            Condition:
+              ArnEquals:
+                "aws:SourceArn": !Ref rCwAlarmSns
+      Queues:
+        - Ref: Queue
+
+  LambdaFunctionEventSourceMapping:
+    Type: AWS::Lambda::EventSourceMapping
+    Properties:
+      BatchSize: 10
+      Enabled: true
+      EventSourceArn: !GetAtt Queue.Arn
+      FunctionName: !GetAtt rFormattedEmailLambdaFunction.Arn
+
+
 Outputs:
   InstanceId:
     Description: InstanceId of the newly created EC2 instance
