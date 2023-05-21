@@ -3,10 +3,8 @@ Description: 'Comprehensive experiences'
 Parameters:
   myVPC:
     Type: String
-    Default: vpc-043df4e8f89c50c5c
   mySubnet:
     Type: String
-    Default: subnet-08c5b5823ea811c9e
   InstanceType:
     Description: WebServer EC2 instance type
     Type: String
@@ -58,19 +56,15 @@ Parameters:
   pEmailToAddress:
     Type: String
     Description: 'Receiver (To:) email address'
-    Default: '764093375@qq.com'
   pEmailSource:
     Type: String
     Description: Sender email address. Should be a verified identity in SES
-    Default: '764093375@qq.com'
   pEmailCcAddress:
     Type: String
     Description: 'Receiver (Cc:) email address'
-    Default: '764093375@qq.com'
   pEmailReplyToAddress:
     Type: String
     Description: Reply To email address
-    Default: '764093375@qq.com'
 
 Metadata:
   'AWS::CloudFormation::Interface':
